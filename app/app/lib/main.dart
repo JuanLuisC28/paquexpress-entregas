@@ -1,121 +1,352 @@
+import 'dart:convert';
+import 'dart:io' show File;
+import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+const String baseUrl = kIsWeb
+    ? 'http://127.0.0.1:8000'
+    : 'http://192.168.1.XX:8000'; // Cambia por la IP de tu servidor local
 
 void main() {
-  runApp(const MyApp());
+  runApp(
+    const MaterialApp(debugShowCheckedModeBanner: false, home: LoginScreen()),
+  );
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class LoginScreen extends StatefulWidget {
+  const LoginScreen({super.key});
+  @override
+  _LoginScreenState createState() => _LoginScreenState();
+}
 
-  // This widget is the root of your application.
+class _LoginScreenState extends State<LoginScreen> {
+  final _userController = TextEditingController();
+  final _passController = TextEditingController();
+  bool _loading = false;
+
+  Future<void> _login() async {
+    setState(() => _loading = true);
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/login'),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({
+          "usuario": _userController.text,
+          "password": _passController.text,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ListaPaquetesScreen(agenteId: data['agente_id']),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Usuario o contraseña incorrectos")),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Error: $e")));
+    }
+    setState(() => _loading = false);
+  }
+
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: .fromSeed(seedColor: Colors.deepPurple),
+    return Scaffold(
+      appBar: AppBar(title: const Text("Paquexpress")),
+      body: Center(
+        child: Container(
+          padding: const EdgeInsets.all(20.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.local_shipping, size: 80, color: Colors.blue),
+              const SizedBox(height: 20),
+              TextField(
+                controller: _userController,
+                decoration: const InputDecoration(
+                  labelText: "Usuario",
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _passController,
+                decoration: const InputDecoration(
+                  labelText: "Contraseña",
+                  border: OutlineInputBorder(),
+                ),
+                obscureText: true,
+              ),
+              const SizedBox(height: 20),
+              _loading
+                  ? const CircularProgressIndicator()
+                  : ElevatedButton(
+                      onPressed: _login,
+                      child: const Text("INGRESAR"),
+                    ),
+            ],
+          ),
+        ),
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
+class ListaPaquetesScreen extends StatefulWidget {
+  final int agenteId;
+  const ListaPaquetesScreen({super.key, required this.agenteId});
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  _ListaPaquetesScreenState createState() => _ListaPaquetesScreenState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class _ListaPaquetesScreenState extends State<ListaPaquetesScreen> {
+  List paquetes = [];
+  bool _isLoading = true;
 
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
+  @override
+  void initState() {
+    super.initState();
+    _cargarPaquetes();
+  }
+
+  Future<void> _cargarPaquetes() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/paquetes/${widget.agenteId}'),
+      );
+      if (response.statusCode == 200) {
+        setState(() {
+          paquetes = jsonDecode(response.body);
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      setState(() => _isLoading = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
-      appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
-      ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: .center,
-          children: [
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
+      appBar: AppBar(title: const Text("Entregas Pendientes")),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : paquetes.isEmpty
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: const [
+                  Icon(Icons.inbox, size: 60, color: Colors.grey),
+                  SizedBox(height: 10),
+                  Text(
+                    "Sin entregas pendientes",
+                    style: TextStyle(fontSize: 20, color: Colors.grey),
+                  ),
+                ],
+              ),
+            )
+          : ListView.builder(
+              itemCount: paquetes.length,
+              itemBuilder: (context, index) {
+                final p = paquetes[index];
+                return Card(
+                  child: ListTile(
+                    title: Text("Destino: ${p['direccion_destino']}"),
+                    subtitle: Text("ID: ${p['id']}"),
+                    trailing: const Icon(Icons.arrow_forward),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => DetalleEntregaScreen(paquete: p),
+                        ),
+                      ).then((_) => _cargarPaquetes());
+                    },
+                  ),
+                );
+              },
             ),
+    );
+  }
+}
+
+class DetalleEntregaScreen extends StatefulWidget {
+  final dynamic paquete;
+  const DetalleEntregaScreen({super.key, required this.paquete});
+
+  @override
+  _DetalleEntregaScreenState createState() => _DetalleEntregaScreenState();
+}
+
+class _DetalleEntregaScreenState extends State<DetalleEntregaScreen> {
+  File? _imagenMovil;
+  Uint8List? _imagenWeb;
+  String? _gpsData;
+  bool _enviando = false;
+
+  Future<void> _abrirMapa() async {
+    final lat = widget.paquete['latitud_destino'];
+    final lng = widget.paquete['longitud_destino'];
+    final url = Uri.parse(
+      "https://www.google.com/maps/search/?api=1&query=$lat,$lng",
+    );
+
+    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("No se pudo abrir el mapa")));
+    }
+  }
+
+  Future<void> _tomarFotoYGPS() async {
+    try {
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+      setState(() => _gpsData = "${position.latitude},${position.longitude}");
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Error GPS: $e")));
+    }
+
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(
+      source: ImageSource.camera,
+      imageQuality: 50,
+    );
+
+    if (pickedFile != null) {
+      if (kIsWeb) {
+        var f = await pickedFile.readAsBytes();
+        setState(() => _imagenWeb = f);
+      } else {
+        setState(() => _imagenMovil = File(pickedFile.path));
+      }
+    }
+  }
+
+  Future<void> _confirmarEntrega() async {
+    if ((_imagenMovil == null && _imagenWeb == null) || _gpsData == null)
+      return;
+    setState(() => _enviando = true);
+
+    try {
+      var request = http.MultipartRequest(
+        'POST',
+        Uri.parse('$baseUrl/entregar'),
+      );
+      request.fields['id_paquete'] = widget.paquete['id'].toString();
+      request.fields['gps'] = _gpsData!;
+
+      if (kIsWeb) {
+        request.files.add(
+          http.MultipartFile.fromBytes(
+            'file',
+            _imagenWeb!,
+            filename: 'evidencia_web.jpg',
+          ),
+        );
+      } else {
+        request.files.add(
+          await http.MultipartFile.fromPath('file', _imagenMovil!.path),
+        );
+      }
+
+      var response = await request.send();
+      if (response.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Paquete entregado con éxito"),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+        await Future.delayed(const Duration(seconds: 2));
+        Navigator.pop(context);
+      } else {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text("Error al subir")));
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Error de conexión")));
+    }
+    setState(() => _enviando = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text("Entrega #${widget.paquete['id']}")),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          children: [
+            Text(
+              "Destino: ${widget.paquete['direccion_destino']}",
+              style: const TextStyle(fontSize: 18),
+            ),
+            const SizedBox(height: 20),
+
+            ElevatedButton.icon(
+              icon: const Icon(Icons.map),
+              label: const Text("VER RUTA EN MAPA"),
+              onPressed: _abrirMapa,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue[50],
+                minimumSize: const Size(double.infinity, 50),
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            Container(
+              height: 400,
+              color: Colors.grey[200],
+              child: (_imagenMovil == null && _imagenWeb == null)
+                  ? const Center(child: Text("Sin foto"))
+                  : kIsWeb
+                  ? Image.memory(_imagenWeb!, fit: BoxFit.cover)
+                  : Image.file(_imagenMovil!, fit: BoxFit.cover),
+            ),
+
+            const SizedBox(height: 10),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.camera_alt),
+              label: const Text("FOTO Y GPS"),
+              onPressed: _tomarFotoYGPS,
+            ),
+
+            Text("GPS: ${_gpsData ?? 'Esperando...'}"),
+            const SizedBox(height: 20),
+            _enviando
+                ? const CircularProgressIndicator()
+                : ElevatedButton(
+                    onPressed:
+                        ((_imagenMovil != null || _imagenWeb != null) &&
+                            _gpsData != null)
+                        ? _confirmarEntrega
+                        : null,
+                    child: const Text("FINALIZAR ENTREGA"),
+                  ),
           ],
         ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
       ),
     );
   }
